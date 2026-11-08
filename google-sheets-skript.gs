@@ -73,7 +73,7 @@ function schreibeBargeld(ss, entries) {
       const typ = e.type === "in" ? "Einnahme" : "Ausgabe";
       const [y, m, d] = e.date.split("-").map(Number);
       const zeile = map[typ + "|" + String(e.cat || "").trim().toLowerCase()] || (typ === "Einnahme" ? 2 : 28);
-      return [typ, new Date(y, m - 1, d), e.cat || "", e.cents / 100, e.comment || "", e.parts || "", e.id, zeile, m, y];
+      return [typ, new Date(y, m - 1, d, 12), e.cat || "", e.cents / 100, e.comment || "", e.parts || "", e.id, zeile, m, y];
     });
   sh.getRange(2, 1, Math.max(sh.getMaxRows() - 1, 1), kopf.length).clearContent();
   sh.getRange(1, 1, 1, kopf.length).setValues([kopf]).setFontWeight("bold");
