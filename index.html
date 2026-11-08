@@ -718,11 +718,12 @@ let openRows = new Set();
 function detailHtml(z){
   if(!openRows.has(String(z))) return "";
   const items = (db.budget.details||{})[z] || [];
-  if(!items.length) return `<div class="det"><small>Keine Einzelbuchungen zugeordnet.</small></div>`;
+  if(!items.length) return `<div class="det"><small>${b_det_hinweis()}</small></div>`;
   const privat = String(z)==="14"; // Sparplan: Anbieter nicht anzeigen
   return `<div class="det">${items.map(x=>`<div class="drow"><span><b>${esc(privat?"Sparplan":x.wer)}</b>${x.text&&!privat?`<small>${esc(x.text)}</small>`:""}</span>
     <span>${esc(x.datum)}<br>${eurN(x.betrag)}</span></div>`).join("")}</div>`;
 }
+const b_det_hinweis = () => db.budget && db.budget.details ? "Keine Einzelbuchungen in diesem Monat." : "Einzelbuchungen kommen erst mit dem aktualisierten Google-Skript.";
 const eurN = v => Number(v||0).toLocaleString("de-DE",{style:"currency",currency:"EUR"});
 function renderBudget(){
   const el = $("#bdBody"), b = db.budget;
@@ -736,7 +737,7 @@ function renderBudget(){
     const max = Math.max(v.schnitt, v.wert, 1);
     const pct = Math.min(100, v.wert/max*100);
     const has = ((b.details||{})[v.zeile]||[]).length;
-    return `<div class="cbar ${has?"tap":""}" data-z="${v.zeile}"><div class="t"><span>${esc(v.name)}${has?` <em>${openRows.has(String(v.zeile))?"▾":"▸"}</em>`:""}</span><span>${eurN(v.wert)}</span></div>
+    return `<div class="cbar tap" data-z="${v.zeile}"><div class="t"><span>${esc(v.name)} <em>${openRows.has(String(v.zeile))?"▾":"▸"}</em></span><span>${eurN(v.wert)}</span></div>
       <div class="track"><div class="fill ${v.wert>v.schnitt?"over":""}" style="width:${pct}%"></div></div>
       <small>Ø ${eurN(v.schnitt)} pro Monat</small>${detailHtml(v.zeile)}</div>`;
   }).join("");

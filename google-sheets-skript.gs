@@ -158,6 +158,17 @@ function ordneZu(regeln, roh) {
   return treffer ? treffer.zeile : "";
 }
 
+/* Datum robust erkennen (Datumsobjekt aus der Tabelle oder Text TT.MM.JJJJ / JJJJ-MM-TT) */
+function alsDatum(v) {
+  if (v && typeof v.getFullYear === "function" && !isNaN(v.getTime())) return v;
+  const s = String(v || "");
+  let m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{4})/);
+  if (m) return new Date(Number(m[3]), Number(m[2]) - 1, Number(m[1]), 12);
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), 12);
+  return null;
+}
+
 /* Einzelbuchungen des Monats je Tabelle1-Zeile (Konto + Bargeld) */
 function details(ss, jahr, monat) {
   const d = {};
@@ -172,8 +183,8 @@ function details(ss, jahr, monat) {
     const iT = ix("Buchungstag"), iB = ix("Betrag"), iE = ix("Beguenstigter/Auftraggeber"), iV = ix("Verwendungszweck"), iZ = ix("Zeile");
     if (iT >= 0 && iZ >= 0) {
       for (let i = 1; i < w.length; i++) {
-        const t = w[i][iT];
-        if (!(t instanceof Date) || t.getFullYear() !== jahr || t.getMonth() + 1 !== monat) continue;
+        const t = alsDatum(w[i][iT]);
+        if (!t || t.getFullYear() !== jahr || t.getMonth() + 1 !== monat) continue;
         const z = Number(w[i][iZ]);
         if (!z) continue;
         add(z, { datum: fmt(t), wer: String(w[i][iE] || ""), text: String(w[i][iV] || "").slice(0, 80), betrag: -Number(w[i][iB]) });
@@ -185,7 +196,7 @@ function details(ss, jahr, monat) {
     bg.getRange(2, 1, bg.getLastRow() - 1, 10).getValues().forEach(r => {
       if (Number(r[8]) !== monat || Number(r[9]) !== jahr) return;
       const ein = r[0] === "Einnahme";
-      add(Number(r[7]), { datum: r[1] instanceof Date ? fmt(r[1]) : "", wer: "Bar · " + r[2],
+      add(Number(r[7]), { datum: alsDatum(r[1]) ? fmt(alsDatum(r[1])) : "", wer: "Bar · " + r[2],
         text: [r[4], r[5]].filter(String).join(" · "), betrag: ein ? -Number(r[3]) : Number(r[3]), bar: true });
     });
   }
@@ -219,7 +230,10 @@ function offene(ss, jahr, monat) {
   const iT = k.indexOf("Buchungstag"), iZ = k.indexOf("Zeile");
   if (iT < 0 || iZ < 0) return 0;
   let n = 0;
-  for (let i = 1; i < w.length; i++) if (w[i][iT] instanceof Date && w[i][iT].getFullYear() === jahr && w[i][iT].getMonth() + 1 === monat && w[i][iZ] === "") n++;
+  for (let i = 1; i < w.length; i++) {
+    const t = alsDatum(w[i][iT]);
+    if (t && t.getFullYear() === jahr && t.getMonth() + 1 === monat && w[i][iZ] === "") n++;
+  }
   return n;
 }
 
@@ -279,7 +293,7 @@ function budget(ss) {
 
   return {
     monat: String(T[0][spalte - 1]) + " " + jahr,
-    kontodatenBis: stand instanceof Date ? Utilities.formatDate(stand, ss.getSpreadsheetTimeZone(), "dd.MM.yyyy") : String(stand || ""),
+    kontodatenBis: alsDatum(stand) ? Utilities.formatDate(stand, ss.getSpreadsheetTimeZone(), "dd.MM.yyyy") : String(stand || ""),
     einnahmen: { wert: einnahmen, erwartet: einErwartet },
     fest: fest, summeFest: summeFest,
     variabel: variabel, summeVar: summeVar,
