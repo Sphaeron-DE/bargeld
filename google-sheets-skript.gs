@@ -193,6 +193,24 @@ function details(ss, jahr, monat) {
   return d;
 }
 
+/* Monatswerte aller Zeilen für die Jahresansicht */
+function jahresdaten(T, t, jahr, monat) {
+  const zeilen = {}, namen = {};
+  const nr = [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32];
+  nr.forEach(r => {
+    namen[r] = String(T[r - 1][0]).replace(/^\*+/, "").trim();
+    zeilen[r] = T[r - 1].slice(1, 13).map(v => (typeof v === "number" ? Math.round(v * 100) / 100 : 0));
+  });
+  const kredit = t.getRange(45, 2, 1, 12).getValues()[0].map(v => (typeof v === "number" ? v : 0));
+  return {
+    jahr: jahr,
+    monate: T[0].slice(1, 13).map(String),
+    aktuell: monat,
+    erfasst: Number(t.getRange("N42").getValue()) || 0,
+    zeilen: zeilen, namen: namen, kreditaufnahme: kredit
+  };
+}
+
 /* Buchungen ohne Zuordnung im laufenden Monat zählen */
 function offene(ss, jahr, monat) {
   const fg = ss.getSheetByName("Finanzguru");
@@ -268,6 +286,7 @@ function budget(ss) {
     schnittVar: variabel.reduce((s, x) => s + x.schnitt, 0),
     rest: einnahmen - summeFest - summeVar,
     details: details(ss, jahr, monat),
+    jahr: jahresdaten(T, t, jahr, monat),
     offen: offene(ss, jahr, monat),
     erstellt: new Date().toISOString()
   };
