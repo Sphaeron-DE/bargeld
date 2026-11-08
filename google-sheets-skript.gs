@@ -137,6 +137,8 @@ function schreibeFinanzguru(ss, fg) {
     sh.getRange(start, 1, neu.length, vorhKopf.length).setValues(neu);
     const tag = vorhKopf.indexOf("Buchungstag");
     if (tag >= 0) sh.getRange(start, tag + 1, neu.length, 1).setNumberFormat("dd.MM.yyyy");
+    const zs = vorhKopf.indexOf("Zeile");
+    if (zs >= 0) sh.getRange(2, zs + 1, sh.getMaxRows() - 1, 1).setNumberFormat("0");
     // nach Buchungstag sortieren, neueste oben
     if (tag >= 0) sh.getRange(2, 1, sh.getLastRow() - 1, vorhKopf.length).sort({ column: tag + 1, ascending: false });
   }
@@ -159,6 +161,14 @@ function ordneZu(regeln, roh) {
 }
 
 /* Datum robust erkennen (Datumsobjekt aus der Tabelle oder Text TT.MM.JJJJ / JJJJ-MM-TT) */
+/* Zeilennummer lesen, auch wenn die Zelle versehentlich als Datum formatiert ist */
+function zeileNr(v) {
+  if (v instanceof Date || Object.prototype.toString.call(v) === "[object Date]") {
+    return Math.round((v.getTime() - Date.UTC(1899, 11, 30)) / 86400000);
+  }
+  return Number(v) || 0;
+}
+
 function alsDatum(v) {
   if (v && typeof v.getFullYear === "function" && !isNaN(v.getTime())) return v;
   const s = String(v || "");
@@ -185,7 +195,7 @@ function details(ss, jahr, monat) {
       for (let i = 1; i < w.length; i++) {
         const t = alsDatum(w[i][iT]);
         if (!t || t.getFullYear() !== jahr || t.getMonth() + 1 !== monat) continue;
-        const z = Number(w[i][iZ]);
+        const z = zeileNr(w[i][iZ]);
         if (!z) continue;
         add(z, { datum: fmt(t), wer: String(w[i][iE] || ""), text: String(w[i][iV] || "").slice(0, 80), betrag: -Number(w[i][iB]) });
       }
