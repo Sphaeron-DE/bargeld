@@ -111,6 +111,15 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
 .cbar .fill{height:100%;border-radius:4px;background:var(--accent)}
 .cbar .fill.over{background:var(--red)}
 .cbar small{color:var(--muted);font-size:12px}
+.tap{cursor:pointer}
+.tap em{color:var(--muted);font-style:normal}
+.det{margin:6px 0 2px;padding:4px 10px;background:#161c10;border-radius:10px}
+.drow{display:flex;justify-content:space-between;gap:10px;padding:6px 0;border-top:1px solid var(--line);font-size:13px}
+.drow:first-child{border-top:0}
+.drow span:first-child{flex:1;min-width:0}
+.drow b{font-weight:600;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow small{display:block;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.drow span:last-child{text-align:right;white-space:nowrap;color:var(--muted)}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + var(--safe-bot));background:#000c;padding:10px 16px;border-radius:12px;z-index:50;font-size:15px}
 .ver{color:var(--muted);font-size:12px;text-align:center;margin:20px}
 </style>
@@ -585,6 +594,16 @@ async function syncSheet(manual){
 }
 
 /* ---------- Budget-Ansicht ---------- */
+const shortName = n => String(n).replace(/BTC-?\s*/i,"");
+let openRows = new Set();
+function detailHtml(z){
+  if(!openRows.has(String(z))) return "";
+  const items = (db.budget.details||{})[z] || [];
+  if(!items.length) return `<div class="det"><small>Keine Einzelbuchungen zugeordnet.</small></div>`;
+  const privat = String(z)==="14"; // Sparplan: Anbieter nicht anzeigen
+  return `<div class="det">${items.map(x=>`<div class="drow"><span><b>${esc(privat?"Sparplan":x.wer)}</b>${x.text&&!privat?`<small>${esc(x.text)}</small>`:""}</span>
+    <span>${esc(x.datum)}<br>${eurN(x.betrag)}</span></div>`).join("")}</div>`;
+}
 const eurN = v => Number(v||0).toLocaleString("de-DE",{style:"currency",currency:"EUR"});
 function renderBudget(){
   const el = $("#bdBody"), b = db.budget;
@@ -595,12 +614,14 @@ function renderBudget(){
   const bars = b.variabel.filter(v=>v.wert>0 || v.schnitt>0).sort((x,y)=>y.wert-x.wert).map(v=>{
     const max = Math.max(v.schnitt, v.wert, 1);
     const pct = Math.min(100, v.wert/max*100);
-    return `<div class="cbar"><div class="t"><span>${esc(v.name)}</span><span>${eurN(v.wert)}</span></div>
+    const has = ((b.details||{})[v.zeile]||[]).length;
+    return `<div class="cbar ${has?"tap":""}" data-z="${v.zeile}"><div class="t"><span>${esc(v.name)}${has?` <em>${openRows.has(String(v.zeile))?"▾":"▸"}</em>`:""}</span><span>${eurN(v.wert)}</span></div>
       <div class="track"><div class="fill ${v.wert>v.schnitt?"over":""}" style="width:${pct}%"></div></div>
-      <small>Ø ${eurN(v.schnitt)} pro Monat</small></div>`;
+      <small>Ø ${eurN(v.schnitt)} pro Monat</small>${detailHtml(v.zeile)}</div>`;
   }).join("");
   el.innerHTML = `
     <div class="big"><small>Noch verfügbar im ${esc(b.monat)}</small><b class="${rest<0?"neg":"pos"}">${eurN(rest)}</b></div>
+    ${b.offen?`<div class="meta" style="color:var(--warn)">${b.offen===1?"1 Kontobuchung wartet":b.offen+" Kontobuchungen warten"} noch auf Zuordnung.</div>`:""}
     <div class="meta">Kontodaten bis ${esc(b.kontodatenBis||"–")} · Bargeld aktuell${at?` · Stand ${pad(at.getHours())}:${pad(at.getMinutes())} Uhr`:""}</div>
     <div class="sec">
       <div class="bsum"><span>Einnahmen${b.einnahmen.erwartet?" (erwartet)":""}</span><span class="pos">${eurN(b.einnahmen.wert)}</span></div>
@@ -608,16 +629,21 @@ function renderBudget(){
     </div>
     <div class="sec">
       <div class="bsum"><span>Feste &amp; geplante Kosten</span><span class="neg">${eurN(b.summeFest)}</span></div>
-      ${b.fest.map(f=>`<div class="brow"><span>${esc(f.name)} ${f.erwartet?"<em>erwartet</em>":""}</span><span>${eurN(f.wert)}</span></div>`).join("")}
+      ${b.fest.map(f=>{ const has=((b.details||{})[f.zeile]||[]).length;
+        return `<div class="brow-wrap ${has?"tap":""}" data-z="${f.zeile}"><div class="brow"><span>${esc(shortName(f.name))} ${f.erwartet?"<em>erwartet</em>":""}${has?` <em>${openRows.has(String(f.zeile))?"▾":"▸"}</em>`:""}</span><span>${eurN(f.wert)}</span></div>${detailHtml(f.zeile)}</div>`; }).join("")}
     </div>
     <div class="sec">
       <div class="bsum"><span>Ausgaben bisher</span><span class="neg">${eurN(b.summeVar)}</span></div>
-      <p style="margin:0 0 6px">Sonst im Schnitt ${eurN(b.schnittVar)} pro Monat. Rot = schon über dem Durchschnitt.</p>
+      <p style="margin:0 0 6px">Sonst im Schnitt ${eurN(b.schnittVar)} pro Monat. Rot = schon über dem Durchschnitt. Antippen zeigt die Buchungen.</p>
       ${bars || "<p>Noch keine Ausgaben.</p>"}
     </div>`;
 }
 $("#openBudget").onclick = ()=>{ renderBudget(); show("budget"); if(db.sheetUrl && (!db.budgetAt || Date.now()-db.budgetAt > 60000)) syncSheet(false); };
 $("#bdBack").onclick = closeSheets;
+$("#bdBody").onclick = ev => {
+  const t = ev.target.closest(".tap"); if(!t) return;
+  const z = t.dataset.z; openRows.has(z) ? openRows.delete(z) : openRows.add(z); renderBudget();
+};
 $("#bdRefresh").onclick = ()=>{ if(db.sheetUrl){ syncSheet(true); renderBudget(); } };
 
 /* ---------- Finanzguru-Import ---------- */

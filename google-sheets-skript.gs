@@ -12,7 +12,9 @@
  *    Spalte H = Zeile im Haushaltsbuch (aus Blatt „Zuordnung“), I = Monat, J = Jahr.
  *  - Blatt „Finanzguru“: Buchungen aus dem Finanzguru-Export. Neue Buchungen werden
  *    angehängt, schon vorhandene (gleiche Buchungs-ID) übersprungen.
- *  - Antwortet mit dem Budget des laufenden Monats aus „Tabelle1“.
+ *    Spalte „Zeile“ ordnet jede Buchung einer Zeile in Tabelle1 zu: automatisch über das
+ *    Blatt „Regeln“ (Suchtext → Zeile), Umbuchungen bekommen „-“. Leere Zeile = noch offen.
+ *  - Antwortet mit dem Budget des laufenden Monats aus „Tabelle1“, inkl. Einzelbuchungen je Zeile.
  */
 const SCHLUESSEL = "HIER-DEN-SCHLUESSEL-AUS-DER-APP-EINFUEGEN";
 
@@ -97,7 +99,14 @@ function schreibeFinanzguru(ss, fg) {
     sh.getRange(1, 1, 1, kopf.length + 1).setValues([kopf.concat(["Importiert am"])]).setFontWeight("bold");
     sh.setFrozenRows(1);
   }
-  const vorhKopf = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  let vorhKopf = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
+  if (vorhKopf.indexOf("Zeile") < 0) {
+    if (sh.getMaxColumns() < vorhKopf.length + 1) sh.insertColumnsAfter(sh.getMaxColumns(), 1);
+    sh.getRange(1, vorhKopf.length + 1).setValue("Zeile").setFontWeight("bold");
+    vorhKopf = vorhKopf.concat(["Zeile"]);
+  }
+  const regeln = ladeRegeln(ss);
+  const ab = new Date(new Date().getFullYear() - 1, 0, 1); // nur aktuelle Buchungen automatisch zuordnen
   const vorhId = vorhKopf.indexOf("Buchungs-ID");
   const ids = new Set();
   if (sh.getLastRow() > 1) {
@@ -110,8 +119,12 @@ function schreibeFinanzguru(ss, fg) {
     if (!id || ids.has(id)) return;
     ids.add(id);
     // Spalten in der Reihenfolge des vorhandenen Blatts ablegen
+    const roh = name => { const i = kopf.indexOf(name); return i < 0 ? "" : r[i]; };
+    const tag = new Date(String(roh("Buchungstag")).slice(0, 10) + "T12:00:00");
+    const zuordnungZeile = tag >= ab ? ordneZu(regeln, roh) : "";
     const zeile = vorhKopf.map(k => {
       if (k === "Importiert am") return jetzt;
+      if (k === "Zeile") return zuordnungZeile;
       const i = kopf.indexOf(k);
       if (i < 0) return "";
       const v = r[i];
@@ -128,6 +141,68 @@ function schreibeFinanzguru(ss, fg) {
     if (tag >= 0) sh.getRange(2, 1, sh.getLastRow() - 1, vorhKopf.length).sort({ column: tag + 1, ascending: false });
   }
   return { neu: neu.length, gesamt: ids.size };
+}
+
+function ladeRegeln(ss) {
+  const sh = ss.getSheetByName("Regeln");
+  if (!sh || sh.getLastRow() < 2) return [];
+  return sh.getRange(2, 1, sh.getLastRow() - 1, 2).getValues()
+    .filter(r => r[0] !== "" && r[1] !== "")
+    .map(r => ({ text: String(r[0]).toLowerCase(), zeile: r[1] }));
+}
+
+function ordneZu(regeln, roh) {
+  if (String(roh("Analyse-Umbuchung")).toLowerCase() === "ja") return "-";
+  const text = [roh("Beguenstigter/Auftraggeber"), roh("Verwendungszweck"), roh("Analyse-Unterkategorie")].join(" ").toLowerCase();
+  const treffer = regeln.find(x => text.indexOf(x.text) >= 0);
+  return treffer ? treffer.zeile : "";
+}
+
+/* Einzelbuchungen des Monats je Tabelle1-Zeile (Konto + Bargeld) */
+function details(ss, jahr, monat) {
+  const d = {};
+  const add = (z, x) => { (d[z] = d[z] || []).push(x); };
+  const tz = ss.getSpreadsheetTimeZone();
+  const fmt = v => Utilities.formatDate(v, tz, "dd.MM.");
+  const fg = ss.getSheetByName("Finanzguru");
+  if (fg && fg.getLastRow() > 1) {
+    const w = fg.getDataRange().getValues();
+    const k = w[0];
+    const ix = n => k.indexOf(n);
+    const iT = ix("Buchungstag"), iB = ix("Betrag"), iE = ix("Beguenstigter/Auftraggeber"), iV = ix("Verwendungszweck"), iZ = ix("Zeile");
+    if (iT >= 0 && iZ >= 0) {
+      for (let i = 1; i < w.length; i++) {
+        const t = w[i][iT];
+        if (!(t instanceof Date) || t.getFullYear() !== jahr || t.getMonth() + 1 !== monat) continue;
+        const z = Number(w[i][iZ]);
+        if (!z) continue;
+        add(z, { datum: fmt(t), wer: String(w[i][iE] || ""), text: String(w[i][iV] || "").slice(0, 80), betrag: -Number(w[i][iB]) });
+      }
+    }
+  }
+  const bg = ss.getSheetByName("Bargeld");
+  if (bg && bg.getLastRow() > 1) {
+    bg.getRange(2, 1, bg.getLastRow() - 1, 10).getValues().forEach(r => {
+      if (Number(r[8]) !== monat || Number(r[9]) !== jahr) return;
+      const ein = r[0] === "Einnahme";
+      add(Number(r[7]), { datum: r[1] instanceof Date ? fmt(r[1]) : "", wer: "Bar · " + r[2],
+        text: [r[4], r[5]].filter(String).join(" · "), betrag: ein ? -Number(r[3]) : Number(r[3]), bar: true });
+    });
+  }
+  Object.keys(d).forEach(z => d[z].sort((a, b) => b.datum.split(".").reverse().join("").localeCompare(a.datum.split(".").reverse().join(""))));
+  return d;
+}
+
+/* Buchungen ohne Zuordnung im laufenden Monat zählen */
+function offene(ss, jahr, monat) {
+  const fg = ss.getSheetByName("Finanzguru");
+  if (!fg || fg.getLastRow() < 2) return 0;
+  const w = fg.getDataRange().getValues(), k = w[0];
+  const iT = k.indexOf("Buchungstag"), iZ = k.indexOf("Zeile");
+  if (iT < 0 || iZ < 0) return 0;
+  let n = 0;
+  for (let i = 1; i < w.length; i++) if (w[i][iT] instanceof Date && w[i][iT].getFullYear() === jahr && w[i][iT].getMonth() + 1 === monat && w[i][iZ] === "") n++;
+  return n;
 }
 
 /* ---------- Budget ---------- */
@@ -169,11 +244,12 @@ function budget(ss) {
   // Feste und geplante Posten: gebucht oder erwartet (Median der Vormonate)
   const fest = Z.fixZeilen.map(r => {
     const w = ist(r);
-    return w > 0 ? { name: name(r), wert: w, erwartet: false } : { name: name(r), wert: median(r), erwartet: true };
+    return w > 0 ? { zeile: r, name: name(r), wert: w, erwartet: false } : { zeile: r, name: name(r), wert: median(r), erwartet: true };
   }).filter(x => x.wert > 0);
 
   // Variable Ausgaben: bisher (Konto + Bargeld)
   const variabel = Z.varZeilen.map(r => ({
+    zeile: r,
     name: name(r),
     wert: kontoDa ? ist(r) : bar(r),
     schnitt: schnitt(r)
@@ -191,6 +267,8 @@ function budget(ss) {
     variabel: variabel, summeVar: summeVar,
     schnittVar: variabel.reduce((s, x) => s + x.schnitt, 0),
     rest: einnahmen - summeFest - summeVar,
+    details: details(ss, jahr, monat),
+    offen: offene(ss, jahr, monat),
     erstellt: new Date().toISOString()
   };
 }
