@@ -94,6 +94,23 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
 .keyrow{display:flex;gap:8px;align-items:center}
 .keyrow code{flex:1;background:#161c10;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px;word-break:break-all}
 .keyrow .btn{width:auto;margin:0;padding:10px 14px}
+.big{text-align:center;margin:18px 16px 6px}
+.big small{display:block;color:var(--muted);font-size:14px}
+.big b{font-size:40px;font-weight:600}
+.meta{color:var(--muted);font-size:13px;text-align:center;margin:0 16px 8px}
+.brow{display:flex;justify-content:space-between;gap:10px;padding:7px 0;border-top:1px solid var(--line);font-size:15px}
+.brow:first-of-type{border-top:0}
+.brow span:first-child{flex:1;min-width:0}
+.brow em{color:var(--muted);font-style:normal;font-size:12px}
+.bsum{display:flex;justify-content:space-between;font-weight:600;margin-bottom:6px}
+.cbar{padding:7px 0;border-top:1px solid var(--line)}
+.cbar:first-of-type{border-top:0}
+.cbar .t{display:flex;justify-content:space-between;font-size:14px;gap:8px}
+.cbar .t span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cbar .track{height:8px;background:#30332a;border-radius:4px;margin-top:5px;position:relative;overflow:hidden}
+.cbar .fill{height:100%;border-radius:4px;background:var(--accent)}
+.cbar .fill.over{background:var(--red)}
+.cbar small{color:var(--muted);font-size:12px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + var(--safe-bot));background:#000c;padding:10px 16px;border-radius:12px;z-index:50;font-size:15px}
 .ver{color:var(--muted);font-size:12px;text-align:center;margin:20px}
 </style>
@@ -105,7 +122,7 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
   <header>
     <div class="hrow">
       <h1>Bargeld</h1>
-      <button class="iconbtn" id="openSettings" aria-label="Einstellungen">⚙️</button>
+      <span><button class="iconbtn" id="openBudget" aria-label="Budget">📊</button><button class="iconbtn" id="openSettings" aria-label="Einstellungen">⚙️</button></span>
     </div>
     <div class="month">
       <button class="iconbtn" id="prevM" aria-label="Vormonat">‹</button>
@@ -190,6 +207,13 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
     <p>Ist die Adresse eingetragen, schickt die App nach jedem Speichern automatisch alle Einträge an deine Tabelle. Ohne Internet wird es beim nächsten Öffnen nachgeholt.</p>
   </div>
   <div class="sec">
+    <h2>Finanzguru</h2>
+    <p>Export aus Finanzguru (xlsx) auswählen. Die Buchungen landen im Blatt „Finanzguru“ deiner Haushaltsbuch-Tabelle, schon vorhandene werden übersprungen.</p>
+    <button class="btn" id="fgBtn">Finanzguru-Export einlesen</button>
+    <input type="file" id="fgFile" accept=".xlsx,.xls,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" class="hidden">
+    <p id="fgStatus"></p>
+  </div>
+  <div class="sec">
     <h2>Wiederherstellen</h2>
     <p>Liest eine Sicherung (CSV) ein. Vorhandene Einträge werden nicht doppelt angelegt.</p>
     <button class="btn alt" id="importBtn">Sicherung einlesen</button>
@@ -214,6 +238,18 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
     </div>
   </div>
   <div class="ver">Bargeld-App · Daten liegen auf diesem Gerät und, falls eingerichtet, in deiner Google-Tabelle</div>
+</div>
+
+<!-- Budget -->
+<div class="sheet hidden" id="budget">
+  <header>
+    <div class="hrow">
+      <button class="iconbtn" id="bdBack" aria-label="Zurück">‹</button>
+      <h1>Budget</h1>
+      <button class="iconbtn" id="bdRefresh" aria-label="Aktualisieren">🔄</button>
+    </div>
+  </header>
+  <div id="bdBody"></div>
 </div>
 
 <div class="toast hidden" id="toast"></div>
@@ -367,10 +403,10 @@ $("#bannerBackup").onclick = ()=> db.sheetUrl ? syncSheet(true) : exportCSV(fals
 $("#openSettings").onclick = ()=> { renderSettings(); show("settings"); };
 
 function show(id){
-  ["home","editor","settings"].forEach(x => $("#"+x).classList.toggle("hidden", x!==id && x!=="home"));
+  ["home","editor","settings","budget"].forEach(x => $("#"+x).classList.toggle("hidden", x!==id && x!=="home"));
   window.scrollTo(0,0);
 }
-function closeSheets(){ $("#editor").classList.add("hidden"); $("#settings").classList.add("hidden"); renderHome(); }
+function closeSheets(){ ["editor","settings","budget"].forEach(x=>$("#"+x).classList.add("hidden")); renderHome(); }
 
 /* ---------- Editor ---------- */
 let ed = null; // {id,type,cat,date}
@@ -529,6 +565,7 @@ async function syncSheet(manual){
                                        body:JSON.stringify(sheetPayload())});
     const j = await r.json();
     if(!j.ok) throw new Error(j.fehler||"Fehler");
+    if(j.budget){ db.budget = j.budget; db.budgetAt = Date.now(); }
     db.lastSync = Date.now(); db.lastExport = db.lastSync; db.syncPending = false; db.syncError = "";
     save();
     if(manual) toast(`${j.anzahl} Einträge an Google Sheets gesendet`);
@@ -543,8 +580,89 @@ async function syncSheet(manual){
     syncing = false;
     renderBanner();
     if(!$("#settings").classList.contains("hidden")) renderSettings();
+    if(!$("#budget").classList.contains("hidden")) renderBudget();
   }
 }
+
+/* ---------- Budget-Ansicht ---------- */
+const eurN = v => Number(v||0).toLocaleString("de-DE",{style:"currency",currency:"EUR"});
+function renderBudget(){
+  const el = $("#bdBody"), b = db.budget;
+  if(!db.sheetUrl){ el.innerHTML = `<div class="sec"><p>Für die Budget-Übersicht zuerst unter Einstellungen → Google Sheets die Adresse eintragen.</p></div>`; return; }
+  if(!b){ el.innerHTML = `<div class="sec"><p>${syncing?"Lade …":"Noch keine Daten. Tippe oben rechts auf 🔄."}</p></div>`; return; }
+  const at = db.budgetAt ? new Date(db.budgetAt) : null;
+  const rest = b.rest;
+  const bars = b.variabel.filter(v=>v.wert>0 || v.schnitt>0).sort((x,y)=>y.wert-x.wert).map(v=>{
+    const max = Math.max(v.schnitt, v.wert, 1);
+    const pct = Math.min(100, v.wert/max*100);
+    return `<div class="cbar"><div class="t"><span>${esc(v.name)}</span><span>${eurN(v.wert)}</span></div>
+      <div class="track"><div class="fill ${v.wert>v.schnitt?"over":""}" style="width:${pct}%"></div></div>
+      <small>Ø ${eurN(v.schnitt)} pro Monat</small></div>`;
+  }).join("");
+  el.innerHTML = `
+    <div class="big"><small>Noch verfügbar im ${esc(b.monat)}</small><b class="${rest<0?"neg":"pos"}">${eurN(rest)}</b></div>
+    <div class="meta">Kontodaten bis ${esc(b.kontodatenBis||"–")} · Bargeld aktuell${at?` · Stand ${pad(at.getHours())}:${pad(at.getMinutes())} Uhr`:""}</div>
+    <div class="sec">
+      <div class="bsum"><span>Einnahmen${b.einnahmen.erwartet?" (erwartet)":""}</span><span class="pos">${eurN(b.einnahmen.wert)}</span></div>
+      <p style="margin:0">${b.einnahmen.erwartet?"Gehalt noch nicht gebucht, daher üblicher Betrag angenommen.":"Gebucht laut Haushaltsbuch."}</p>
+    </div>
+    <div class="sec">
+      <div class="bsum"><span>Feste &amp; geplante Kosten</span><span class="neg">${eurN(b.summeFest)}</span></div>
+      ${b.fest.map(f=>`<div class="brow"><span>${esc(f.name)} ${f.erwartet?"<em>erwartet</em>":""}</span><span>${eurN(f.wert)}</span></div>`).join("")}
+    </div>
+    <div class="sec">
+      <div class="bsum"><span>Ausgaben bisher</span><span class="neg">${eurN(b.summeVar)}</span></div>
+      <p style="margin:0 0 6px">Sonst im Schnitt ${eurN(b.schnittVar)} pro Monat. Rot = schon über dem Durchschnitt.</p>
+      ${bars || "<p>Noch keine Ausgaben.</p>"}
+    </div>`;
+}
+$("#openBudget").onclick = ()=>{ renderBudget(); show("budget"); if(db.sheetUrl && (!db.budgetAt || Date.now()-db.budgetAt > 60000)) syncSheet(false); };
+$("#bdBack").onclick = closeSheets;
+$("#bdRefresh").onclick = ()=>{ if(db.sheetUrl){ syncSheet(true); renderBudget(); } };
+
+/* ---------- Finanzguru-Import ---------- */
+function loadXLSX(){
+  return new Promise((ok,fail)=>{
+    if(window.XLSX) return ok(window.XLSX);
+    const sc = document.createElement("script"); sc.src = "xlsx.mini.min.js";
+    sc.onload = ()=>ok(window.XLSX); sc.onerror = ()=>fail(new Error("Leser konnte nicht geladen werden"));
+    document.head.appendChild(sc);
+  });
+}
+const cellOut = v => v instanceof Date ? isoDate(v) : (v===undefined||v===null ? "" : v);
+$("#fgBtn").onclick = ()=>{
+  if(!db.sheetUrl){ toast("Zuerst Google Sheets einrichten."); return; }
+  $("#fgFile").click();
+};
+$("#fgFile").onchange = async ev => {
+  const f = ev.target.files[0]; ev.target.value=""; if(!f) return;
+  const st = $("#fgStatus"); st.textContent = "Lese Datei …";
+  try{
+    const X = await loadXLSX();
+    const wb = X.read(await f.arrayBuffer(), {type:"array"});
+    const ws = wb.Sheets[wb.SheetNames[0]];
+    const all = X.utils.sheet_to_json(ws, {header:1, raw:true, defval:""});
+    const hi = all.findIndex(r => r.includes("Buchungs-ID"));
+    if(hi<0) throw new Error("Das ist kein Finanzguru-Export (Spalte Buchungs-ID fehlt).");
+    const header = all[hi].map(String);
+    // Excel-Datumszahlen (Buchungstag) zeitzonensicher in JJJJ-MM-TT umwandeln
+    const serial = v => { const d = new Date(Math.round((v-25569)*864e5)); return `${d.getUTCFullYear()}-${pad(d.getUTCMonth()+1)}-${pad(d.getUTCDate())}`; };
+    const dateCols = header.map(h => /^(Buchungstag|Valuta|Datum)/i.test(h));
+    const rows = all.slice(hi+1).filter(r=>r.some(c=>c!=="")).map(r=>header.map((_,i)=>
+      dateCols[i] && typeof r[i]==="number" ? serial(r[i]) : cellOut(r[i])));
+    st.textContent = `${rows.length} Buchungen gelesen, sende …`;
+    const r = await fetch(db.sheetUrl,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},
+                                      body:JSON.stringify({token:db.sheetToken, finanzguru:{header, rows}})});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.fehler||"Fehler");
+    if(j.budget){ db.budget = j.budget; db.budgetAt = Date.now(); }
+    db.lastFg = Date.now(); save();
+    st.textContent = `${j.finanzguru.neu} neue Buchungen übernommen (${j.finanzguru.gesamt} insgesamt im Blatt).`;
+    toast(`${j.finanzguru.neu} neue Buchungen übernommen`);
+  }catch(err){
+    st.textContent = "Fehler: " + (err && err.message || err);
+  }
+};
 function afterChange(){ if(db.sheetUrl){ db.syncPending = true; save(); syncSheet(false); } }
 $("#gsCopy").onclick = async ()=>{
   try{ await navigator.clipboard.writeText(db.sheetToken); toast("Schlüssel kopiert"); }

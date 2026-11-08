@@ -34,15 +34,20 @@ Einstellungen → **Sicherung einlesen** → CSV-Datei wählen. Bereits vorhande
 - Der Export ist eine CSV-Datei mit Semikolon (öffnet sich direkt in Excel/Numbers): Typ; Datum; Kategorie; Betrag; Kommentar; ID.
 - Kategorien lassen sich in den Einstellungen anlegen, umbenennen, sortieren und ausblenden.
 
-## Google Sheets (automatischer Abgleich)
+## Google Sheets: Haushaltsbuch, Budget und Finanzguru
 
-Damit landen alle Einträge nach jedem Speichern automatisch in einer Google-Tabelle in deinem Drive.
+Die App arbeitet mit der Haushaltsbuch-Tabelle in Google Sheets zusammen:
+- Jeder Bargeld-Eintrag landet automatisch im Blatt **Bargeld** und von dort über **Bargeld je Zeile** in der richtigen Zeile von **Tabelle1**. Welche App-Kategorie in welche Zeile gehört, steht im Blatt **Zuordnung** und kann dort geändert werden.
+- In der App zeigt **📊 Budget**, was im laufenden Monat noch übrig ist.
+- Unter Einstellungen → **Finanzguru-Export einlesen** landen die Kontobuchungen im Blatt **Finanzguru**. Schon vorhandene Buchungen werden übersprungen.
 
-1. In Google Drive (am besten am PC) im Haushaltsbuch-Ordner **Neu → Google Tabellen** anlegen, z. B. „Bargeld“.
-2. In der Tabelle **Erweiterungen → Apps Script** öffnen. Den vorhandenen Text löschen und den Inhalt von `google-sheets-skript.gs` einfügen.
-3. In der Bargeld-App unter **Einstellungen → Google Sheets** den **Schlüssel** kopieren und im Skript statt `HIER-DEN-SCHLUESSEL-AUS-DER-APP-EINFUEGEN` einsetzen (Anführungszeichen stehen lassen). Speichern (Disketten-Symbol).
-4. **Bereitstellen → Neue Bereitstellung** → Zahnrad → **Web-App**. „Ausführen als: Ich“, „Zugriff: Jeder“ → **Bereitstellen**. Google fragt einmal nach Berechtigungen: Konto wählen → „Erweitert“ → „Zu … wechseln (unsicher)“ → Zulassen. Das ist normal bei eigenen Skripten.
-5. Die angezeigte **Web-App-URL** (endet auf `/exec`) kopieren, in der App unter Einstellungen → Google Sheets einfügen und **Speichern & jetzt senden** tippen.
+### Einrichtung (einmalig, am PC)
+1. Die Haushaltsbuch-Tabelle öffnen → **Erweiterungen → Apps Script**.
+2. Den vorhandenen Text in Code.gs löschen und den Inhalt von `google-sheets-skript.gs` einfügen.
+3. In Zeile mit `SCHLUESSEL` den Schlüssel aus der App einsetzen (Einstellungen → Google Sheets → Kopieren), Anführungszeichen stehen lassen. Speichern.
+4. **Bereitstellen → Neue Bereitstellung** → Zahnrad → **Web-App**. „Ausführen als: Ich“, „Zugriff: Jeder“ → **Bereitstellen** → Zugriff erlauben (Erweitert → „unsicher“ → Zulassen).
+5. Die neue **Web-App-URL** (endet auf `/exec`) in der App unter Einstellungen → Google Sheets eintragen und **Speichern & jetzt senden** tippen.
 
-Die Tabelle bekommt zwei Blätter: **Bargeld** (alle Einträge) und **Monate** (Ausgaben, Einnahmen, Saldo je Monat). Die App überschreibt diese beiden Blätter bei jedem Senden komplett, eigene Notizen also in ein anderes Blatt schreiben.
-Der Schlüssel sorgt dafür, dass nur deine App in die Tabelle schreiben kann.
+Wird das Skript später geändert: **Bereitstellen → Bereitstellungen verwalten** → Stift → Version „Neue Version“ → Bereitstellen. Die Adresse bleibt dann gleich.
+
+Die Blätter **Bargeld** und **Finanzguru** schreibt die App. Eigene Notizen bitte in andere Blätter.
