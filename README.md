@@ -33,3 +33,16 @@ Einstellungen → **Sicherung einlesen** → CSV-Datei wählen. Bereits vorhande
 - Das App-Symbol vom Home-Bildschirm zu löschen löscht auch die Daten. Vorher sichern.
 - Der Export ist eine CSV-Datei mit Semikolon (öffnet sich direkt in Excel/Numbers): Typ; Datum; Kategorie; Betrag; Kommentar; ID.
 - Kategorien lassen sich in den Einstellungen anlegen, umbenennen, sortieren und ausblenden.
+
+## Google Sheets (automatischer Abgleich)
+
+Damit landen alle Einträge nach jedem Speichern automatisch in einer Google-Tabelle in deinem Drive.
+
+1. In Google Drive (am besten am PC) im Haushaltsbuch-Ordner **Neu → Google Tabellen** anlegen, z. B. „Bargeld“.
+2. In der Tabelle **Erweiterungen → Apps Script** öffnen. Den vorhandenen Text löschen und den Inhalt von `google-sheets-skript.gs` einfügen.
+3. In der Bargeld-App unter **Einstellungen → Google Sheets** den **Schlüssel** kopieren und im Skript statt `HIER-DEN-SCHLUESSEL-AUS-DER-APP-EINFUEGEN` einsetzen (Anführungszeichen stehen lassen). Speichern (Disketten-Symbol).
+4. **Bereitstellen → Neue Bereitstellung** → Zahnrad → **Web-App**. „Ausführen als: Ich“, „Zugriff: Jeder“ → **Bereitstellen**. Google fragt einmal nach Berechtigungen: Konto wählen → „Erweitert“ → „Zu … wechseln (unsicher)“ → Zulassen. Das ist normal bei eigenen Skripten.
+5. Die angezeigte **Web-App-URL** (endet auf `/exec`) kopieren, in der App unter Einstellungen → Google Sheets einfügen und **Speichern & jetzt senden** tippen.
+
+Die Tabelle bekommt zwei Blätter: **Bargeld** (alle Einträge) und **Monate** (Ausgaben, Einnahmen, Saldo je Monat). Die App überschreibt diese beiden Blätter bei jedem Senden komplett, eigene Notizen also in ein anderes Blatt schreiben.
+Der Schlüssel sorgt dafür, dass nur deine App in die Tabelle schreiben kann.

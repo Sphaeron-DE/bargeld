@@ -89,6 +89,11 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
 .colors{grid-column:1/-1;display:flex;gap:8px;flex-wrap:wrap}
 .colors button{width:30px;height:30px;border-radius:50%;border:3px solid transparent}
 .colors button.on{border-color:var(--text)}
+.flabel{display:block;color:var(--muted);font-size:13px;margin:10px 0 4px}
+.tin{width:100%;background:#161c10;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px}
+.keyrow{display:flex;gap:8px;align-items:center}
+.keyrow code{flex:1;background:#161c10;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:14px;word-break:break-all}
+.keyrow .btn{width:auto;margin:0;padding:10px 14px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(90px + var(--safe-bot));background:#000c;padding:10px 16px;border-radius:12px;z-index:50;font-size:15px}
 .ver{color:var(--muted);font-size:12px;text-align:center;margin:20px}
 </style>
@@ -172,7 +177,17 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
     <p id="lastBackup"></p>
     <button class="btn" id="exportAll">Alles sichern (CSV)</button>
     <button class="btn alt" id="exportMonth">Nur angezeigten Monat exportieren</button>
-    <p>Tipp: Im Teilen-Menü „In Dateien sichern“ wählen und immer denselben iCloud-Ordner nehmen. Jede Sicherung enthält alle Einträge.</p>
+    <p>Tipp: Im Teilen-Menü „In Dateien sichern“ wählen und immer denselben Ordner nehmen. Jede Sicherung enthält alle Einträge.</p>
+  </div>
+  <div class="sec">
+    <h2>Google Sheets</h2>
+    <p id="gsStatus"></p>
+    <label class="flabel" for="gsUrl">Web-App-Adresse aus Google</label>
+    <input class="tin" id="gsUrl" placeholder="https://script.google.com/macros/s/…/exec" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <label class="flabel">Schlüssel (ins Google-Skript einfügen)</label>
+    <div class="keyrow"><code id="gsToken"></code><button class="btn alt" id="gsCopy">Kopieren</button></div>
+    <button class="btn" id="gsSave">Speichern &amp; jetzt senden</button>
+    <p>Ist die Adresse eingetragen, schickt die App nach jedem Speichern automatisch alle Einträge an deine Tabelle. Ohne Internet wird es beim nächsten Öffnen nachgeholt.</p>
   </div>
   <div class="sec">
     <h2>Wiederherstellen</h2>
@@ -198,7 +213,7 @@ main{padding:12px 16px calc(110px + var(--safe-bot))}
       <button class="btn" id="ncAdd">Kategorie anlegen</button>
     </div>
   </div>
-  <div class="ver">Bargeld-App · Daten bleiben nur auf diesem Gerät</div>
+  <div class="ver">Bargeld-App · Daten liegen auf diesem Gerät und, falls eingerichtet, in deiner Google-Tabelle</div>
 </div>
 
 <div class="toast hidden" id="toast"></div>
@@ -241,6 +256,7 @@ function save(){
   try{ localStorage.setItem(KEY, JSON.stringify(db)); }
   catch(e){ toast("Speichern fehlgeschlagen! Bitte sofort sichern."); }
 }
+if(!db.sheetToken){ db.sheetToken = Array.from(crypto.getRandomValues(new Uint8Array(12)),b=>b.toString(36).padStart(2,"0")).join("").slice(0,20); save(); }
 if(navigator.storage && navigator.storage.persist){ navigator.storage.persist().catch(()=>{}); }
 
 /* ---------- Hilfen ---------- */
@@ -328,6 +344,13 @@ function renderBanner(){
   const last = db.lastExport || 0;
   if(newest <= last && !db.deletedSinceExport){ b.classList.add("hidden"); return; }
   const hours = (Date.now()-last)/36e5;
+  if(db.sheetUrl){
+    if(!db.syncPending || syncing){ b.classList.add("hidden"); return; }
+    $("#backupText").textContent = "Noch nicht an Google Sheets gesendet.";
+    $("#bannerBackup").textContent = "Senden";
+    b.classList.remove("hidden"); return;
+  }
+  $("#bannerBackup").textContent = "Sichern";
   if(last && hours < 20){ b.classList.add("hidden"); return; }
   const n = db.entries.filter(e => (e.changed||e.created) > last).length;
   $("#backupText").textContent = last
@@ -340,7 +363,7 @@ $("#prevM").onclick = ()=>{ view.setMonth(view.getMonth()-1); renderHome(); };
 $("#nextM").onclick = ()=>{ view.setMonth(view.getMonth()+1); renderHome(); };
 $("#list").onclick = ev => { const b = ev.target.closest(".entry"); if(b) openEditor(b.dataset.id); };
 $("#addBtn").onclick = ()=> openEditor(null);
-$("#bannerBackup").onclick = ()=> exportCSV(false);
+$("#bannerBackup").onclick = ()=> db.sheetUrl ? syncSheet(true) : exportCSV(false);
 $("#openSettings").onclick = ()=> { renderSettings(); show("settings"); };
 
 function show(id){
@@ -439,12 +462,13 @@ $("#saveBtn").onclick = ()=>{
   view = new Date(ed.date+"T12:00"); view.setDate(1);
   toast(ed.id ? "Gespeichert" : `${eur(cents)} erfasst`);
   closeSheets();
+  afterChange();
 };
 $("#delBtn").onclick = ()=>{
   if(!confirm("Diesen Eintrag wirklich löschen?")) return;
   db.entries = db.entries.filter(x=>x.id!==ed.id);
   db.deletedSinceExport = true;
-  save(); toast("Gelöscht"); closeSheets();
+  save(); toast("Gelöscht"); closeSheets(); afterChange();
 };
 
 /* ---------- Export ---------- */
@@ -487,6 +511,53 @@ async function exportCSV(onlyMonth){
 }
 $("#exportAll").onclick = ()=> exportCSV(false);
 $("#exportMonth").onclick = ()=> exportCSV(true);
+
+/* ---------- Google Sheets ---------- */
+let syncing = false;
+function sheetPayload(){
+  return {token:db.sheetToken, entries:db.entries.map(e=>{
+    const c = catById(e.cat);
+    return {id:e.id,type:e.type,date:e.date,cat:c?c.name:(e.catName||""),cents:e.cents,
+            comment:e.comment||"",parts:e.parts?fmtParts(e.parts):"",created:e.created||0};
+  })};
+}
+async function syncSheet(manual){
+  if(!db.sheetUrl || syncing) return false;
+  syncing = true;
+  try{
+    const r = await fetch(db.sheetUrl,{method:"POST",headers:{"Content-Type":"text/plain;charset=utf-8"},
+                                       body:JSON.stringify(sheetPayload())});
+    const j = await r.json();
+    if(!j.ok) throw new Error(j.fehler||"Fehler");
+    db.lastSync = Date.now(); db.lastExport = db.lastSync; db.syncPending = false; db.syncError = "";
+    save();
+    if(manual) toast(`${j.anzahl} Einträge an Google Sheets gesendet`);
+    return true;
+  }catch(err){
+    db.syncPending = true;
+    db.syncError = String(err && err.message || err);
+    save();
+    if(manual) toast(`Senden fehlgeschlagen: ${db.syncError}`);
+    return false;
+  }finally{
+    syncing = false;
+    renderBanner();
+    if(!$("#settings").classList.contains("hidden")) renderSettings();
+  }
+}
+function afterChange(){ if(db.sheetUrl){ db.syncPending = true; save(); syncSheet(false); } }
+$("#gsCopy").onclick = async ()=>{
+  try{ await navigator.clipboard.writeText(db.sheetToken); toast("Schlüssel kopiert"); }
+  catch(e){ toast("Kopieren nicht möglich, bitte abtippen"); }
+};
+$("#gsSave").onclick = ()=>{
+  const u = $("#gsUrl").value.trim();
+  if(u && !/^https:\/\/script\.google(usercontent)?\.com\//.test(u)){ toast("Das sieht nicht nach einer Google-Script-Adresse aus."); return; }
+  db.sheetUrl = u; save();
+  if(u) syncSheet(true); else { toast("Google Sheets ausgeschaltet"); renderSettings(); }
+};
+document.addEventListener("visibilitychange", ()=>{ if(!document.hidden && db.syncPending) syncSheet(false); });
+window.addEventListener("online", ()=>{ if(db.syncPending) syncSheet(false); });
 
 /* ---------- Import ---------- */
 function parseCSV(text){
@@ -534,7 +605,7 @@ $("#importFile").onchange = async ev => {
         created:now,changed:0});
       ids.add(id); added++;
     }
-    save(); renderSettings(); renderHome();
+    save(); renderSettings(); renderHome(); if(added) afterChange();
     toast(`${added} Einträge eingelesen${skipped?`, ${skipped} übersprungen`:""}`);
   }catch(err){ toast("Datei konnte nicht gelesen werden."); }
 };
@@ -545,6 +616,12 @@ function renderSettings(){
   const last = db.lastExport ? new Date(db.lastExport) : null;
   $("#lastBackup").textContent = `${db.entries.length} Einträge gespeichert. Letzte Sicherung: ` +
     (last ? `${deDate(isoDate(last))}, ${pad(last.getHours())}:${pad(last.getMinutes())} Uhr` : "noch keine");
+  $("#gsUrl").value = db.sheetUrl || "";
+  $("#gsToken").textContent = db.sheetToken;
+  const ls = db.lastSync ? new Date(db.lastSync) : null;
+  $("#gsStatus").textContent = !db.sheetUrl ? "Noch nicht eingerichtet." :
+    (db.syncPending && db.syncError ? `Letzter Versuch fehlgeschlagen (${db.syncError}). ` : "") +
+    (ls ? `Zuletzt gesendet: ${deDate(isoDate(ls))}, ${pad(ls.getHours())}:${pad(ls.getMinutes())} Uhr` : "Noch nichts gesendet.");
   const row = c => {
     const used = db.entries.some(e=>e.cat===c.id);
     return `<div class="crow" data-id="${c.id}" style="${c.hidden?"opacity:.45":""}">
@@ -587,6 +664,7 @@ $("#stBack").onclick = closeSheets;
 
 /* ---------- Start ---------- */
 renderHome();
+if(db.syncPending) syncSheet(false);
 if("serviceWorker" in navigator && location.protocol==="https:"){
   navigator.serviceWorker.register("sw.js").catch(()=>{});
 }
